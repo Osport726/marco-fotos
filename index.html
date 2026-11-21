@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fotos">
+<title>Marco de fotos</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  .foto {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background-position: center; background-repeat: no-repeat;
+    background-size: contain;
+    opacity: 0;
+    -webkit-transition: opacity 1.5s ease-in-out;
+    transition: opacity 1.5s ease-in-out;
+  }
+  .foto.visible { opacity: 1; }
+  #reloj {
+    position: absolute; right: 28px; bottom: 20px;
+    color: #fff; font: 200 48px -apple-system, "Helvetica Neue", Helvetica, sans-serif;
+    text-shadow: 0 1px 8px rgba(0,0,0,.85);
+  }
+  #estado {
+    position: absolute; top: 24px; left: 50%; margin-left: -80px; width: 160px;
+    padding: 8px 0; border-radius: 20px; background: rgba(0,0,0,.55);
+    text-align: center; color: #fff; font: 20px -apple-system, Helvetica, sans-serif;
+    display: none;
+  }
+  #msg {
+    position: absolute; top: 50%; left: 0; right: 0; margin-top: -14px;
+    text-align: center; color: #aaa; font: 22px -apple-system, Helvetica, sans-serif;
+  }
+</style>
+</head>
+<body>
+<div id="a" class="foto"></div>
+<div id="b" class="foto"></div>
+<div id="reloj"></div>
+<div id="msg">Cargando fotos…</div>
+<div id="estado">❚❚ En pausa</div>
+
+<script>
+// ===== CONFIGURACIÓN =====
+// El ID de la aplicación web de Apps Script va en la dirección de esta página:
+//   https://usuario.github.io/marco-fotos/?id=AKfycb...
+// (así el ID no queda escrito en el repositorio público)
+var SCRIPT_URL = (function () {
+  var m = /[?&#]id=([\w-]+)/.exec(location.href);
+  return m ? 'https://script.google.com/macros/s/' + m[1] + '/exec' : '';
+})();
+var SEGUNDOS = 15;          // tiempo por foto
+var ALEATORIO = true;       // orden aleatorio
+var MOSTRAR_RELOJ = true;
+var AJUSTE = 'contain';     // 'contain' = foto completa con bordes negros, 'cover' = llena la pantalla
+var REFRESCO_MIN = 60;      // cada cuánto busca fotos nuevas en el álbum
+var TAMANO = '=w2048-h2048'; // resolución pedida a Google (pantalla del iPad 4: 2048x1536)
+
+var fotos = [], orden = [], pos = 0, actual = 0, timer = null;
+var capas = [document.getElementById('a'), document.getElementById('b')];
+var msg = document.getElementById('msg');
+
+capas[0].style.backgroundSize = AJUSTE;
+capas[1].style.backgroundSize = AJUSTE;
+
+function mostrarMsg(t) { msg.textContent = t; msg.style.display = 'block'; }
+function ocultarMsg() { msg.style.display = 'none'; }
+
+function mezclar() {
+  orden = [];
+  for (var i = 0; i < fotos.length; i++) orden.push(i);
+  if (ALEATORIO) {
+    for (var j = orden.length - 1; j > 0; j--) {
+      var k = Math.floor(Math.random() * (j + 1));
+      var tmp = orden[j]; orden[j] = orden[k]; orden[k] = tmp;
+    }
+  }
+  pos = 0;
+}
+
+function cargarLista() {
+  var cb = 'marco' + new Date().getTime();
+  var s = document.createElement('script');
+  window[cb] = function (data) {
+    window[cb] = undefined;
+    if (s.parentNode) s.parentNode.removeChild(s);
+    if (data && data.ok && data.photos && data.photos.length) {
+      var primeraVez = fotos.length === 0;
+      fotos = data.photos;
+      mezclar();
+      ocultarMsg();
+      if (primeraVez) siguiente();
+    } else if (!fotos.length) {
+      mostrarMsg('No se pudieron cargar las fotos' + (data && data.error ? ': ' + data.error : ''));
+      setTimeout(cargarLista, 60000);
+    }
+  };
+  s.onerror = function () {
+    if (s.parentNode) s.parentNode.removeChild(s);
+    if (!fotos.length) {
+      mostrarMsg('Sin conexión. Reintentando…');
+      setTimeout(cargarLista, 60000);
+    }
+  };
+  s.src = SCRIPT_URL + (SCRIPT_URL.indexOf('?') < 0 ? '?' : '&') + 'callback=' + cb;
+  document.body.appendChild(s);
+}
+
+var pausado = false, carga = 0;
+
+// Avanza (+1) o retrocede (-1) una foto
+function irA(delta) {
+  clearTimeout(timer);
+  if (!fotos.length) return;
+  var nuevo = (pos - 1) + delta;          // pos apunta a la siguiente; pos-1 es la actual
+  if (nuevo >= orden.length) { mezclar(); nuevo = 0; }
+  if (nuevo < 0) nuevo = orden.length - 1;
+  pos = nuevo + 1;
+  var url = fotos[orden[nuevo]] + TAMANO;
+  var mia = ++carga;                       // ignora cargas viejas si se toca rápido
+  var img = new Image();
+  img.onload = function () {
+    if (mia !== carga) return;
+    mostrar(url);
+    programar();
+  };
+  img.onerror = function () { if (mia === carga) timer = setTimeout(siguiente, 2000); };
+  img.src = url;
+}
+function siguiente() { irA(1); }
+function anterior() { irA(-1); }
+function programar() {
+  clearTimeout(timer);
+  if (!pausado) timer = setTimeout(siguiente, SEGUNDOS * 1000);
+}
+function alternarPausa() {
+  pausado = !pausado;
+  document.getElementById('estado').style.display = pausado ? 'block' : 'none';
+  programar();
+}
+
+function mostrar(url) {
+  var sig = 1 - actual;
+  var vieja = capas[actual];
+  capas[sig].style.backgroundImage = 'url("' + url + '")';
+  capas[sig].className = 'foto visible';
+  vieja.className = 'foto';
+  actual = sig;
+  // Libera memoria de la foto anterior cuando termina la transición (el iPad 4 tiene 1 GB de RAM)
+  setTimeout(function () { if (vieja !== capas[actual]) vieja.style.backgroundImage = 'none'; }, 2000);
+}
+
+function dosDigitos(n) { return (n < 10 ? '0' : '') + n; }
+function actualizarReloj() {
+  var d = new Date(), h = d.getHours(), ampm = h < 12 ? 'a. m.' : 'p. m.';
+  h = h % 12; if (h === 0) h = 12;
+  document.getElementById('reloj').textContent = h + ':' + dosDigitos(d.getMinutes()) + ' ' + ampm;
+}
+
+if (MOSTRAR_RELOJ) { actualizarReloj(); setInterval(actualizarReloj, 10000); }
+else { document.getElementById('reloj').style.display = 'none'; }
+
+// Controles: deslizar <- -> para cambiar de foto; tocar borde izquierdo/derecho = anterior/siguiente;
+// tocar el centro = pausar/reanudar
+var tx = 0, ty = 0;
+function accionToque(x, dx, dy) {
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+    if (dx < 0) siguiente(); else anterior();
+    return;
+  }
+  var w = window.innerWidth;
+  if (x < w / 3) anterior();
+  else if (x > w * 2 / 3) siguiente();
+  else alternarPausa();
+}
+if ('ontouchstart' in window) {
+  document.addEventListener('touchstart', function (e) {
+    tx = e.changedTouches[0].clientX; ty = e.changedTouches[0].clientY;
+  }, false);
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, false);
+  document.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    var p = e.changedTouches[0];
+    accionToque(p.clientX, p.clientX - tx, p.clientY - ty);
+  }, false);
+} else {
+  document.addEventListener('click', function (e) { accionToque(e.clientX, 0, 0); }, false);
+}
+
+if (SCRIPT_URL) {
+  cargarLista();
+  setInterval(cargarLista, REFRESCO_MIN * 60000);
+} else {
+  mostrarMsg('Falta el ?id= de la aplicación web en la dirección');
+}
+</script>
+</body>
+</html>
