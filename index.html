@@ -12,7 +12,7 @@
   .foto {
     position: absolute; top: 0; left: 0; right: 0; bottom: 0;
     background-position: center; background-repeat: no-repeat;
-    background-size: contain;
+    background-size: cover;
     opacity: 0;
     -webkit-transition: opacity 1.5s ease-in-out;
     transition: opacity 1.5s ease-in-out;
@@ -54,7 +54,12 @@ var SCRIPT_URL = (function () {
 var SEGUNDOS = 15;          // tiempo por foto
 var ALEATORIO = true;       // orden aleatorio
 var MOSTRAR_RELOJ = true;
-var AJUSTE = 'contain';     // 'contain' = foto completa con bordes negros, 'cover' = llena la pantalla
+// Cómo llenar la pantalla:
+//  'auto'    = fotos horizontales a pantalla completa (recorta un poco los bordes);
+//              fotos verticales completas sobre un fondo difuminado de la misma foto
+//  'cover'   = todas a pantalla completa (las verticales pierden mucho arriba/abajo)
+//  'contain' = foto completa con bordes negros
+var AJUSTE = 'auto';
 var REFRESCO_MIN = 60;      // cada cuánto busca fotos nuevas en el álbum
 var TAMANO = '=w2048-h2048'; // resolución pedida a Google (pantalla del iPad 4: 2048x1536)
 
@@ -62,8 +67,6 @@ var fotos = [], orden = [], pos = 0, actual = 0, timer = null;
 var capas = [document.getElementById('a'), document.getElementById('b')];
 var msg = document.getElementById('msg');
 
-capas[0].style.backgroundSize = AJUSTE;
-capas[1].style.backgroundSize = AJUSTE;
 
 function mostrarMsg(t) { msg.textContent = t; msg.style.display = 'block'; }
 function ocultarMsg() { msg.style.display = 'none'; }
@@ -118,12 +121,13 @@ function irA(delta) {
   if (nuevo >= orden.length) { mezclar(); nuevo = 0; }
   if (nuevo < 0) nuevo = orden.length - 1;
   pos = nuevo + 1;
-  var url = fotos[orden[nuevo]] + TAMANO;
+  var base = fotos[orden[nuevo]];
+  var url = base + TAMANO;
   var mia = ++carga;                       // ignora cargas viejas si se toca rápido
   var img = new Image();
   img.onload = function () {
     if (mia !== carga) return;
-    mostrar(url);
+    mostrar(base, url, img.naturalWidth, img.naturalHeight);
     programar();
   };
   img.onerror = function () { if (mia === carga) timer = setTimeout(siguiente, 2000); };
@@ -141,10 +145,25 @@ function alternarPausa() {
   programar();
 }
 
-function mostrar(url) {
+function mostrar(base, url, w, h) {
   var sig = 1 - actual;
   var vieja = capas[actual];
-  capas[sig].style.backgroundImage = 'url("' + url + '")';
+  var capa = capas[sig];
+  var pantalla = window.innerWidth / window.innerHeight;
+  var foto = (w && h) ? w / h : pantalla;
+  // 'auto': llena la pantalla si la foto tiene una forma parecida (recorte de máx. ~35%)
+  var llenar = AJUSTE === 'cover' || (AJUSTE === 'auto' && foto / pantalla > 0.75 && foto / pantalla < 1.75);
+  if (llenar) {
+    capa.style.backgroundImage = 'url("' + url + '")';
+    capa.style.backgroundSize = 'cover';
+  } else if (AJUSTE === 'auto') {
+    // foto completa encima + misma foto en miniatura ampliada (se ve difuminada) y oscurecida de fondo
+    capa.style.backgroundImage = 'url("' + url + '"), linear-gradient(rgba(0,0,0,.35), rgba(0,0,0,.35)), url("' + base + '=w48-h48")';
+    capa.style.backgroundSize = 'contain, cover, cover';
+  } else {
+    capa.style.backgroundImage = 'url("' + url + '")';
+    capa.style.backgroundSize = 'contain';
+  }
   capas[sig].className = 'foto visible';
   vieja.className = 'foto';
   actual = sig;
